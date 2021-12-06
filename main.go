@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"go_nfmt_rest_client/restlib"
 	"time"
-	"updatenesw/restlib"
 )
 
 func pprint(content []map[string]interface{}) {
