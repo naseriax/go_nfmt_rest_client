@@ -1,4 +1,4 @@
-package restlib
+package main
 
 import (
 	"bytes"
@@ -106,7 +106,7 @@ func (t *RestAgent) HttpPostJson(url, payload string, header map[string]string) 
 	for k, v := range header {
 		req.Header.Add(k, v)
 	}
-	req.Header.Add("Authorization", "Basic "+t.toBase64())
+	req.Header.Add("Authorization", fmt.Sprintf("%v %v", t.TokenType, t.AccessToken))
 	req.Header.Add("Content-Type", "application/json")
 
 	resp, err := t.Httpclient.Do(req)

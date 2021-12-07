@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"go_nfmt_rest_client/restlib"
 	"time"
 )
 
@@ -16,7 +15,7 @@ func pprint(content []map[string]interface{}) {
 	}
 }
 
-func updateSw(agent restlib.RestAgent) {
+func updateSw(agent RestAgent) {
 
 	var allNEsJson map[string][]map[string]interface{}
 	allNEsRaw := agent.HttpGet("/data/swim/neSoftware", map[string]string{"Range": "items=0-1999"})
@@ -35,10 +34,10 @@ func updateSw(agent restlib.RestAgent) {
 	}
 }
 
-func GetRamanConnections(agent restlib.RestAgent) {
+func GetRamanConnections(agent RestAgent) {
 
 	rawOtsData := agent.HttpGet("/data/npr/physicalConns", map[string]string{})
-	_, listJson := restlib.GeneralJsonDecoder(rawOtsData)
+	_, listJson := GeneralJsonDecoder(rawOtsData)
 	var otslist []map[string]interface{}
 	for _, phycon := range listJson {
 		if phycon["wdmConnectionType"] == "WdmPortType_ots" {
@@ -49,10 +48,10 @@ func GetRamanConnections(agent restlib.RestAgent) {
 }
 
 func main() {
-	ipaddr := "1.1.1.1"
+	ipaddr := "172.29.4.72"
 	uname := "admin"
-	passw := "ppp"
-	restAgent := restlib.Init(ipaddr, uname, passw)
+	passw := "Changeme_1@#"
+	restAgent := Init(ipaddr, uname, passw)
 	defer restAgent.NfmtDeauth()
 
 	updateSw(restAgent)
