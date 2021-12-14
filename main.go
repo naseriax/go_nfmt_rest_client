@@ -10,51 +10,38 @@ import (
 	"time"
 )
 
-func getNEs(agent RestAgent) map[string][]map[string]interface{} {
-	var allNEsJson map[string][]map[string]interface{}
+type NeSwList struct {
+	Items []NEs `json:"items"`
+}
+
+type NEs struct {
+	NeType             string `json:"neType"`
+	NeLabel            string `json:"neLabel"`
+	SecondaryCurStatus string `json:"secondaryCurStatus"`
+	PrimaryCurStatus   string `json:"primaryCurStatus"`
+	SecondarySWVersion string `json:"secondarySWVersion"`
+	PrimarySWVersion   string `json:"primarySWVersion"`
+}
+
+func getNEs(agent RestAgent) NeSwList {
+	var allNEsJson NeSwList
 	allNEsRaw := agent.HttpGet("/data/swim/neSoftware", map[string]string{"Range": "items=0-1999"})
 	json.Unmarshal([]byte(allNEsRaw), &allNEsJson)
 
 	return allNEsJson
 }
 
-func neList(allNEsJson map[string][]map[string]interface{}) []map[string]interface{} {
-	var neList []map[string]interface{}
-	for _, ne := range allNEsJson["items"] {
-		if ne["neType"] == "1830PSS-PHN" {
+func neList(allNEsJson NeSwList) []NEs {
+	var neList []NEs
+	for _, ne := range allNEsJson.Items {
+		if ne.NeType == "1830PSS-PHN" {
 			neList = append(neList, ne)
 		}
 	}
 	return neList
 }
 
-func updateSw(agent RestAgent) {
-
-	allNEsJson := getNEs(agent)
-
-	nelist := neList(allNEsJson)
-
-	var wg sync.WaitGroup
-	workers := 5
-	j := 0
-	for _, ne := range nelist {
-		if j >= workers {
-			fmt.Println("Waiting for an idle worker.")
-			wg.Wait()
-		}
-
-		wg.Add(1)
-		j += 1
-
-		go func(ne map[string]interface{}) {
-			fmt.Printf("Reading the software version from %v.\n", ne["neLabel"])
-			_ = agent.HttpGet(fmt.Sprintf("/swim/neSwStatus?neLabel=%v&neType=--", ne["neLabel"]), nil)
-			wg.Done()
-			j -= 1
-		}(ne)
-	}
-	wg.Wait()
-
+func exportPrep(allNEsJson NeSwList) [][]string {
 	output := [][]string{
 		{
 			"No",
@@ -63,35 +50,61 @@ func updateSw(agent RestAgent) {
 		},
 	}
 	c := 1
-	allNEsJson = getNEs(agent)
-	neVersion := ""
+	for _, ne := range allNEsJson.Items {
+		neName := ne.NeLabel
+		neVersion := ""
 
-	for _, ne := range allNEsJson["items"] {
-		neName := ne["neLabel"]
-
-		if ne["primaryCurStatus"] == "ACTIVATED" {
-			neVersion = ne["primarySWVersion"].(string)
-		} else if ne["secondaryCurStatus"] == "ACTIVATED" {
-			neVersion = ne["secondarySWVersion"].(string)
+		if ne.PrimaryCurStatus == "ACTIVATED" {
+			neVersion = ne.PrimarySWVersion
+		} else if ne.SecondaryCurStatus == "ACTIVATED" {
+			neVersion = ne.SecondarySWVersion
 		} else {
 			neVersion = "UNKNOWN"
 		}
-
 		rowToAdd := []string{
 			fmt.Sprintf("%v", c),
 			fmt.Sprintf("%v", neName),
 			fmt.Sprintf("%v", neVersion),
 		}
 		output = append(output, rowToAdd)
+		c++
 	}
+	return output
+}
 
+func updateSw(agent RestAgent) {
+
+	nelist := neList(getNEs(agent))
+
+	var wg sync.WaitGroup
+	totalWorkers := 5
+	busyWorkers := 0
+
+	for _, ne := range nelist {
+
+		wg.Add(1)
+		busyWorkers += 1
+
+		go func(ne NEs) {
+			log.Printf("Reading the software version from %v.\n", ne.NeLabel)
+			_ = agent.HttpGet(fmt.Sprintf("/swim/neSwStatus?neLabel=%v&neType=--", ne.NeLabel), nil)
+			wg.Done()
+			busyWorkers -= 1
+		}(ne)
+
+		if busyWorkers >= totalWorkers {
+			log.Println("Waiting for an idle worker.")
+			wg.Wait()
+		}
+	}
+	wg.Wait()
+	output := exportPrep(getNEs(agent))
 	err := exportFile(output)
 	if err == nil {
 		log.Println("SUCCESS: NE Software report file has been exported!")
 	} else {
 		panic(err)
 	}
-
 }
 
 func timeCalculator() int64 {
@@ -114,7 +127,7 @@ func exportFile(output [][]string) error {
 }
 
 func main() {
-	ipaddr := "1.2.3.4"
+	ipaddr := "1.1.1.1"
 	uname := "alcatel"
 	passw := "password"
 	restAgent := Init(ipaddr, uname, passw)
