@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 //Token is the object which contains the nfmt single step authentication tokens and the auth and deauth methodes.
@@ -25,63 +26,88 @@ type RestAgent struct {
 }
 
 //NfmtAuth methode does the NFM-T Single step authentication and fills the token variables.
-func (t *RestAgent) login() {
+func (t *RestAgent) login() error {
 
-	req, err := http.NewRequest(
+	req, _ := http.NewRequest(
 		"POST",
 		fmt.Sprintf("https://%v/rest-gateway/rest/api/v1/auth/token", t.IpAddress),
 		strings.NewReader("grant_type=client_credentials"),
 	)
-	errDealer(err)
 
 	req.Header.Add("Authorization", "Basic "+t.toBase64())
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := t.Client.Do(req)
-	errDealer(err)
+	respc := make(chan *http.Response, 1)
+	errc := make(chan error, 1)
+	var resp *http.Response
+
+	go func() {
+		resp, err := t.Client.Do(req)
+		if err != nil {
+			errc <- err
+		}
+		respc <- resp
+	}()
+
+	select {
+	case <-time.After(7 * time.Second):
+		return fmt.Errorf("can't reach the server address. request timed out: %v", t.IpAddress)
+	case err := <-errc:
+		return err
+	case resp = <-respc:
+	}
 
 	if resp.StatusCode != 200 {
-		log.Fatalf("Rest API Authentication Failure: %v %v", resp.StatusCode, http.StatusText(resp.StatusCode))
+		resp.Body.Close()
+		return fmt.Errorf("authentication failure: %v %v", resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
-	errDealer(err)
+	if err != nil {
+		return err
+	}
 
 	json.Unmarshal([]byte(body), &t)
 	log.Println("REST API login: SUCCESS!")
+	return nil
 }
 
 //NfmtDeauth does the deauthentication from the NFM-T.
-func (t *RestAgent) Logout() {
+func (t *RestAgent) Logout() error {
 
-	req, err := http.NewRequest(
+	req, _ := http.NewRequest(
 		"POST",
 		fmt.Sprintf("https://%v/rest-gateway/rest/api/v1/auth/revocation", t.IpAddress),
 		strings.NewReader(fmt.Sprintf("token=%v&token_type_hint=token", t.AccessToken)),
 	)
-	errDealer(err)
 
 	req.Header.Add("Authorization", "Basic "+t.toBase64())
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := t.Client.Do(req)
-	errDealer(err)
-	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		log.Fatalf("Rest API De-Authentication Failure: %v %v", resp.StatusCode, http.StatusText(resp.StatusCode))
+		resp.Body.Close()
+		return fmt.Errorf("logout failure: %v %v", resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 
 	log.Println("REST API logout: SUCCESS!")
+	return nil
 }
 
 //HttpGet send a Get request and returns the response in json string.
-func (t *RestAgent) Get(url string, header map[string]string) string {
+func (t *RestAgent) Get(url string, header map[string]string) (string, error) {
 
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://%v:%v", t.IpAddress, url), nil)
-	errDealer(err)
+	if err != nil {
+		return "", err
+	}
 
 	for k, v := range header {
 		req.Header.Add(k, v)
@@ -91,19 +117,26 @@ func (t *RestAgent) Get(url string, header map[string]string) string {
 	req.Header.Add("Content-Type", "application/json")
 
 	res, err := t.Client.Do(req)
-	errDealer(err)
+	if err != nil {
+		return "", err
+	}
 
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		log.Fatalf("Get Request Failure: %v %v", res.StatusCode, http.StatusText(res.StatusCode))
+		res.Body.Close()
+		return "", fmt.Errorf("get request failure: %v %v", res.StatusCode, http.StatusText(res.StatusCode))
 	}
-	body, err := ioutil.ReadAll(res.Body)
-	errDealer(err)
 
-	return string(body)
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		res.Body.Close()
+		return "", fmt.Errorf("failed tp read the response body for: %v, detail: %v", url, err)
+	}
+
+	return string(body), nil
 }
 
-func (t *RestAgent) PostJson(url, payload string, header map[string]string) []map[string]interface{} {
+func (t *RestAgent) PostJson(url, payload string, header map[string]string) ([]map[string]interface{}, error) {
 	var jsonStr = []byte(payload)
 	var response []map[string]interface{}
 	req, err := http.NewRequest(
@@ -111,7 +144,9 @@ func (t *RestAgent) PostJson(url, payload string, header map[string]string) []ma
 		fmt.Sprintf("https://%v:%v", t.IpAddress, url),
 		bytes.NewBuffer(jsonStr),
 	)
-	errDealer(err)
+	if err != nil {
+		return nil, err
+	}
 
 	for k, v := range header {
 		req.Header.Add(k, v)
@@ -120,32 +155,30 @@ func (t *RestAgent) PostJson(url, payload string, header map[string]string) []ma
 	req.Header.Add("Content-Type", "application/json")
 
 	resp, err := t.Client.Do(req)
-	errDealer(err)
+	if err != nil {
+		return nil, err
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		log.Fatalf("Post Request failure : %v %v", resp.StatusCode, http.StatusText(resp.StatusCode))
+		resp.Body.Close()
+		return nil, fmt.Errorf("post request failure : %v %v", resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
-	errDealer(err)
+	if err != nil {
+		return nil, fmt.Errorf("failed tp read the response body for: %v, detail: %v", url, err)
+	}
 
 	json.Unmarshal([]byte(body), &response)
 
-	return response
+	return response, nil
 }
 
 //toBase64 encodes the user/pass combination to Base64.
 func (t *RestAgent) toBase64() string {
 	auth := t.UserName + ":" + t.Password
 	return base64.StdEncoding.EncodeToString([]byte(auth))
-}
-
-//errDealer panics with error, as a reusable error checking function.
-func errDealer(err error) {
-	if err != nil {
-		log.Fatalln(err)
-	}
 }
 
 //HttpClientCreator creates and returns an unsecure http client object.
@@ -165,13 +198,15 @@ func GeneralJsonDecoder(content string) (map[string]interface{}, []map[string]in
 	}
 }
 
-func Init(ipaddr, uname, passw string) RestAgent {
+func Init(ipaddr, uname, passw string) (RestAgent, error) {
 	token := RestAgent{
 		Client:    createClient(),
 		IpAddress: ipaddr,
 		UserName:  uname,
 		Password:  passw,
 	}
-	token.login()
-	return token
+	if err := token.login(); err != nil {
+		return token, err
+	}
+	return token, nil
 }

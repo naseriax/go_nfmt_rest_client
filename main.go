@@ -25,9 +25,12 @@ type NEs struct {
 
 func getNEs(agent RestAgent) NeSwList {
 	var allNEsJson NeSwList
-	allNEsRaw := agent.Get("/data/swim/neSoftware", map[string]string{"Range": "items=0-1999"})
+	allNEsRaw, err := agent.Get("/data/swim/neSoftware", map[string]string{"Range": "items=0-1999"})
+	if err != nil {
+		fmt.Println(err)
+		return NeSwList{}
+	}
 	json.Unmarshal([]byte(allNEsRaw), &allNEsJson)
-
 	return allNEsJson
 }
 
@@ -87,7 +90,7 @@ func updateSw(agent RestAgent) {
 
 		go func(ne NEs) {
 			log.Printf("Reading the software version from %v.\n", ne.NeLabel)
-			_ = agent.Get(fmt.Sprintf("/swim/neSwStatus?neLabel=%v&neType=--", ne.NeLabel), nil)
+			agent.Get(fmt.Sprintf("/swim/neSwStatus?neLabel=%v&neType=--", ne.NeLabel), nil)
 			wg.Done()
 			busyWorkers -= 1
 		}(ne)
@@ -130,9 +133,14 @@ func main() {
 	ipaddr := "1.1.1.1"
 	uname := "test"
 	passw := "******"
-	restAgent := Init(ipaddr, uname, passw)
+	restAgent, err := Init(ipaddr, uname, passw)
+	if err != nil {
+		log.Fatalln(err)
+	}
 	defer restAgent.Logout()
-
-	print(string(restAgent.Get("8443/oms1350/data/npr/nes", map[string]string{})))
-
+	r, err := restAgent.Get("8443/oms1350/data/npr/nes", map[string]string{})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	print(string(r))
 }
