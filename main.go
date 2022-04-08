@@ -25,7 +25,7 @@ type NEs struct {
 
 func getNEs(agent RestAgent) NeSwList {
 	var allNEsJson NeSwList
-	allNEsRaw := agent.HttpGet("/data/swim/neSoftware", map[string]string{"Range": "items=0-1999"})
+	allNEsRaw := agent.Get("/data/swim/neSoftware", map[string]string{"Range": "items=0-1999"})
 	json.Unmarshal([]byte(allNEsRaw), &allNEsJson)
 
 	return allNEsJson
@@ -87,7 +87,7 @@ func updateSw(agent RestAgent) {
 
 		go func(ne NEs) {
 			log.Printf("Reading the software version from %v.\n", ne.NeLabel)
-			_ = agent.HttpGet(fmt.Sprintf("/swim/neSwStatus?neLabel=%v&neType=--", ne.NeLabel), nil)
+			_ = agent.Get(fmt.Sprintf("/swim/neSwStatus?neLabel=%v&neType=--", ne.NeLabel), nil)
 			wg.Done()
 			busyWorkers -= 1
 		}(ne)
@@ -128,11 +128,11 @@ func exportFile(output [][]string) error {
 
 func main() {
 	ipaddr := "1.1.1.1"
-	uname := "alcatel"
-	passw := "password"
+	uname := "test"
+	passw := "******"
 	restAgent := Init(ipaddr, uname, passw)
-	defer restAgent.NfmtDeauth()
+	defer restAgent.Logout()
 
-	updateSw(restAgent)
+	print(string(restAgent.Get("8443/oms1350/data/npr/nes", map[string]string{})))
 
 }
